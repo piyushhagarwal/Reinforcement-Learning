@@ -44,13 +44,13 @@ import numpy as np
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--instance', required=True, help='Path to the instance file')
-    parser.add_argument('--algorithm', required=True, help='The algorithm to use')
-    parser.add_argument('--randomSeed', required=True, help='The random seed')
-    parser.add_argument('--epsilon', required=True, help='The epsilon value')
-    parser.add_argument('--scale', required=True, help='The scale value')
-    parser.add_argument('--threshold', required=True, help='The threshold value')
-    parser.add_argument('--horizon', required=True, help='The horizon value')
+    parser.add_argument('--instance', required=True, help='Path to the instance file', type=str)
+    parser.add_argument('--algorithm', required=True, help='The algorithm to use', type=str)
+    parser.add_argument('--randomSeed', required=True, help='The random seed', type=int)
+    parser.add_argument('--epsilon', required=True, help='The epsilon value', type=float)
+    parser.add_argument('--scale', required=True, help='The scale value', type=float)
+    parser.add_argument('--threshold', required=True, help='The threshold value', type=float)
+    parser.add_argument('--horizon', required=True, help='The horizon value', type=int)
     return parser.parse_args()
 
 def seed_random(seed):
@@ -95,6 +95,16 @@ def pull_arm(arm_probability):
     return 0
 
 
+import random
+import numpy as np
+
+def pull_arm(prob):
+    """
+    Simulates pulling an arm with a given probability of reward.
+    Returns 1 with probability `prob`, otherwise 0.
+    """
+    return 1 if random.random() < prob else 0
+
 def epsilon_greedy(instance, epsilon, horizon):
     """
     Implements the epsilon-greedy algorithm for a multi-armed bandit problem using the incremental update rule.
@@ -118,6 +128,10 @@ def epsilon_greedy(instance, epsilon, horizon):
     # Variable to store the total cumulative reward over all pulls
     total_reward = 0
     
+    # Print initial state
+    print(f"Initial Q-values: {q_values}")
+    print(f"Initial pulls: {pulls}")
+    
     # Iterate through each round up to the given horizon (number of pulls)
     for t in range(horizon):
         
@@ -125,25 +139,80 @@ def epsilon_greedy(instance, epsilon, horizon):
         if random.random() < epsilon:
             # Exploration: Choose a random arm
             arm = random.randint(0, num_arms - 1)  # Select a random arm
+            print(f"Round {t + 1}: Exploration - Chose random arm {arm}")
         else:
             # Exploitation: Choose the arm with the highest Q-value (estimated average reward)
             arm = np.argmax(q_values)
+            print(f"Round {t + 1}: Exploitation - Chose arm {arm} with Q-value {q_values[arm]}")
         
         # Pull the selected arm and get the reward (0 or 1) using the pull_arm function
         reward = pull_arm(instance[arm])
+        print(f"Round {t + 1}: Pulled arm {arm}, got reward {reward}")
         
         # Update the number of pulls for the selected arm
         pulls[arm] += 1
         
         # Update the Q-value (average reward estimate) for the selected arm using the incremental formula:
         # Q(n+1) = Qn + (1/n) * (Rn - Qn)
+        old_q_value = q_values[arm]
         q_values[arm] += (reward - q_values[arm]) / pulls[arm]
         
         # Update the cumulative total reward
         total_reward += reward
+        
+        # Print updated state
+        print(f"Round {t + 1}: Updated Q-value for arm {arm} from {old_q_value:.4f} to {q_values[arm]:.4f}")
+        print(f"Round {t + 1}: Total reward so far: {total_reward}")
+        print(f"Round {t + 1}: Pulls per arm: {pulls}")
+        print(f"Round {t + 1}: Q-values: {q_values}")
+        print("-" * 40)
     
     # Return the total reward after all pulls have been made
     return total_reward
+
+def ucb(instance, horizon, c=2):
+    """ 
+    UCB (Upper Confidence Bound) algorithm for the multi-armed bandit problem.
+    
+    Parameters:
+    instance (list of floats): A list of probabilities representing the reward distributions for each arm.
+    horizon (int): The number of times the bandit is played, i.e., the total number of pulls.
+    c (float): The exploration parameter for UCB. Default is 2.
+    
+    Returns:
+    total_reward (int): The total cumulative reward accumulated over the horizon. 
+    """
+    num_arms = len(instance)  # Number of arms (each arm has an associated reward probability)
+    rewards = [0] * num_arms  # List to store the cumulative rewards for each arm
+    pulls = [0] * num_arms    # List to track how many times each arm has been pulled
+    total_reward = 0          # Keeps track of the total reward accumulated
+
+    # Step 1: Initial exploration - Pull each arm once to gather some initial data(This is a common practice in bandit algorithms because we need some data to start making informed decisions)
+    for t in range(num_arms):  # Loop through all arms 
+        reward = pull_arm(instance[t])       # Pull each arm once
+        rewards[t] += reward                 # Update the cumulative reward for arm t
+        pulls[t] += 1                        # Increment the pull count for arm t
+        total_reward += reward               # Add the reward to the total reward
+
+    # Step 2: Main loop - Pull arms using the UCB formula for the remaining time steps
+    for t in range(num_arms, horizon):  # Start from the first time step after initial exploration
+        
+        # Step 2.1: Calculate the UCB value for each arm
+        ucb_values = []
+        for i in range(num_arms):
+            ucb_values[i] = rewards[i] / pulls[i] + np.sqrt(c * np.log(t) / pulls[i])
+            
+        # Step 2.2: Select the arm with the highest UCB value
+        arm = np.argmax(ucb_values)
+        
+        # Step 2.3: Pull the selected arm and update rewards and pulls
+        reward = pull_arm(instance[arm])
+        rewards[arm] += reward  # Add the new reward to the cumulative reward for the selected arm
+        pulls[arm] += 1         # Increment the pull count for the selected arm
+        total_reward += reward   # Add the reward to the total reward
+
+    return total_reward  # Return the total reward accumulated over the horizon
+
 
 def calculate_regret(instance, total_reward, horizon):
     """
@@ -161,39 +230,6 @@ def calculate_regret(instance, total_reward, horizon):
     max_mean = max(instance)
     return max_mean * horizon - total_reward
 
-def ucb(instance, horizon):
-    """ 
-    UCB 
-    """
-    num_arms = len(instance)  # Number of arms (each arm has an associated reward probability)
-    rewards = [0] * num_arms  # List to store the cumulative rewards for each arm
-    pulls = [0] * num_arms    # List to track how many times each arm has been pulled
-    total_reward = 0          # Keeps track of the total reward accumulated
-
-    # Step 1: Initial exploration - Pull each arm once to gather some initial data
-    for t in range(min(num_arms, horizon)):  # Loop through all arms or until the horizon if less
-        reward = pull_arm(instance[t])       # Pull each arm once
-        rewards[t] += reward                 # Update the cumulative reward for arm t
-        pulls[t] += 1                        # Increment the pull count for arm t
-        total_reward += reward               # Add the reward to the total reward
-
-    # Step 2: Main loop - Pull arms using the UCB formula for the remaining time steps
-    for t in range(num_arms, horizon):  # Start from the first time step after initial exploration
-        # Step 2.1: Calculate the UCB value for each arm
-        ucb_values = [rewards[i] / pulls[i] + np.sqrt(2 * np.log(t + 1) / pulls[i]) for i in range(num_arms)]
-        
-        # Step 2.2: Select the arm with the highest UCB value
-        arm = np.argmax(ucb_values)
-        
-        # Step 2.3: Pull the selected arm and update rewards and pulls
-        reward = pull_arm(instance[arm])
-        rewards[arm] += reward  # Add the new reward to the cumulative reward for the selected arm
-        pulls[arm] += 1         # Increment the pull count for the selected arm
-        total_reward += reward   # Add the reward to the total reward
-
-    return total_reward  # Return the total reward accumulated over the horizon
-
-
 def main():
     args = parse_args()
     seed_random(args.randomSeed)
@@ -205,7 +241,7 @@ def main():
     if args.algorithm == 'epsilon-greedy-t1':
         total_reward = epsilon_greedy(instance, args.epsilon, args.horizon)
     elif args.algorithm == 'ucb-t1':
-        total_reward = ucb(instance, args.horizon)
+        total_reward = ucb(instance, args.horizon, args.scale)
     elif args.algorithm == 'kl-ucb-t1':
         total_reward = kl_ucb(instance, args.horizon)
     elif args.algorithm == 'thompson-sampling-t1':
@@ -222,3 +258,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
